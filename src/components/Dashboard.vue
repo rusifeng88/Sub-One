@@ -1074,7 +1074,10 @@ const handleNodeDragEnd = async (evt) => {
     :show="showSubscriptionImportModal" 
     @update:show="showSubscriptionImportModal = $event" 
     :add-nodes-from-bulk="addNodesFromBulk"
-    :on-import-success="() => handleDirectSave('导入订阅')"
+    :on-import-success="async () => {
+      await handleDirectSave('导入订阅');
+      triggerDataUpdate();
+    }"
   />
   <NodeDetailsModal :show="showNodeDetailsModal" :subscription="selectedSubscription" @update:show="showNodeDetailsModal = $event" />
   <ProfileNodeDetailsModal 
