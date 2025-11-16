@@ -37,29 +37,46 @@ const FORMAT_MAPPING = {
 };
 
 const subLink = computed(() => {
-  if (!props.config?.mytoken) return '';
-  
   const baseUrl = window.location.origin;
-  const token = props.config.mytoken;
   const format = selectedFormat.value;
   
-  // 构建基础URL
-  const url = selectedId.value === 'default' 
-    ? `${baseUrl}/${token}`
-    : `${baseUrl}/${token}/${selectedId.value}`;
-  
-  // 根据格式添加参数
-  if (format === '自适应') {
-    return url;
+  // 判断是默认订阅还是订阅组
+  if (selectedId.value === 'default') {
+    // 默认订阅使用 mytoken
+    if (!props.config?.mytoken) return '';
+    const token = props.config.mytoken;
+    const url = `${baseUrl}/${token}`;
+    
+    // 根据格式添加参数
+    if (format === '自适应') {
+      return url;
+    }
+    const formatParam = FORMAT_MAPPING[format] || format.toLowerCase();
+    return `${url}?${formatParam}`;
+  } else {
+    // 订阅组使用 profileToken
+    if (!props.config?.profileToken || props.config.profileToken === 'auto' || !props.config.profileToken.trim()) {
+      return '';
+    }
+    const token = props.config.profileToken;
+    const url = `${baseUrl}/${token}/${selectedId.value}`;
+    
+    // 根据格式添加参数
+    if (format === '自适应') {
+      return url;
+    }
+    const formatParam = FORMAT_MAPPING[format] || format.toLowerCase();
+    return `${url}?${formatParam}`;
   }
-  
-  const formatParam = FORMAT_MAPPING[format] || format.toLowerCase();
-  return `${url}?${formatParam}`;
 });
 
 const copyToClipboard = async () => {
   if (!subLink.value) {
-    showToast('链接无效，无法复制', 'error');
+    if (selectedId.value !== 'default' && (!props.config?.profileToken || props.config.profileToken === 'auto' || !props.config.profileToken.trim())) {
+      showToast('请先在设置中配置"订阅组分享Token"', 'error');
+    } else {
+      showToast('链接无效，无法复制', 'error');
+    }
     return;
   }
   
@@ -165,14 +182,20 @@ onUnmounted(() => {
         </div>
 
         <!-- 提示信息 -->
-        <div v-if="config?.mytoken === 'auto'" class="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl border-2 border-yellow-200 dark:border-yellow-800 animate-pulse-breathing">
+        <div v-if="(selectedId === 'default' && config?.mytoken === 'auto') || (selectedId !== 'default' && (!config?.profileToken || config.profileToken === 'auto' || !config.profileToken.trim()))" class="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl border-2 border-yellow-200 dark:border-yellow-800 animate-pulse-breathing">
           <div class="flex items-start gap-3">
             <svg class="w-5 h-5 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
             <div>
-              <p class="text-sm font-medium text-yellow-700 dark:text-yellow-300 mb-1 animate-pulse">自动Token提示</p>
-              <p class="text-xs text-yellow-600 dark:text-yellow-400">当前为自动Token，链接可能会变化。为确保链接稳定，推荐在"设置"中配置一个固定Token。</p>
+              <p class="text-sm font-medium text-yellow-700 dark:text-yellow-300 mb-1 animate-pulse">
+                {{ selectedId === 'default' ? '自动Token提示' : '订阅组Token未配置' }}
+              </p>
+              <p class="text-xs text-yellow-600 dark:text-yellow-400">
+                {{ selectedId === 'default' 
+                  ? '当前为自动Token，链接可能会变化。为确保链接稳定，推荐在"设置"中配置一个固定Token。'
+                  : '订阅组链接需要配置"订阅组分享Token"。请在"设置"中配置一个固定的"订阅组分享Token"后，才能生成有效的订阅组链接。' }}
+              </p>
             </div>
           </div>
         </div>
