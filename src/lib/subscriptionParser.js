@@ -6,18 +6,11 @@ import yaml from 'js-yaml';
  */
 export class SubscriptionParser {
   constructor() {
-    // 支持的所有协议类型，顺序按常用程度排列
     this.supportedProtocols = [
       'ss', 'ssr', 'vmess', 'vless', 'trojan', 
       'hysteria', 'hysteria2', 'hy', 'hy2', 
       'tuic', 'anytls', 'socks5'
     ];
-    
-    // 协议别名映射，用于统一识别
-    this.protocolAliases = {
-      'hy': 'hysteria',
-      'hy2': 'hysteria2'
-    };
     
     // 预编译正则表达式，提升性能
     this._base64Regex = /^[A-Za-z0-9+\/=]+$/;
@@ -225,18 +218,6 @@ export class SubscriptionParser {
    * 构建VMess URL
    */
   buildVmessUrl(proxy) {
-    // 确定传输类型
-    let typeValue = 'none';
-    if (proxy.network === 'ws' || proxy.network === 'http') {
-      // 检查是否有http伪装头
-      if (proxy['ws-opts']?.headers?.['X-Forwarded-For'] || 
-          proxy['http-opts']?.headers?.['X-Forwarded-For']) {
-        typeValue = 'http';
-      } else {
-        typeValue = 'none';
-      }
-    }
-    
     const config = {
       v: '2',
       ps: proxy.name || 'VMess节点',
@@ -245,26 +226,15 @@ export class SubscriptionParser {
       id: proxy.uuid,
       aid: proxy.alterId || 0,
       net: proxy.network || 'tcp',
-      type: typeValue,
-      host: proxy['ws-opts']?.headers?.Host || 
-            proxy['http-opts']?.headers?.Host || 
-            proxy.host || '',
-      path: proxy['ws-opts']?.path || 
-            proxy['http-opts']?.path || 
-            proxy.path || '/',
-      tls: proxy.tls ? 'tls' : 'none'
+      type: proxy.type || 'none',
+      host: proxy['ws-opts']?.headers?.Host || proxy.host || '',
+      path: proxy['ws-opts']?.path || proxy.path || '',
+      tls: proxy.tls || 'none'
     };
 
     const jsonStr = JSON.stringify(config);
     const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
-    let url = `vmess://${base64}`;
-    
-    // 添加名称（虽然VMess在JSON中有ps字段，但有些客户端也支持#后的名称）
-    if (proxy.name) {
-      url += `#${encodeURIComponent(proxy.name)}`;
-    }
-    
-    return url;
+    return `vmess://${base64}`;
   }
 
   /**
@@ -291,7 +261,7 @@ export class SubscriptionParser {
     }
 
     // 添加TLS参数
-    if (proxy.tls === 'tls' || proxy.tls === true) {
+    if (proxy.tls === 'tls') {
       queryParams.push('security=tls');
       if (proxy.sni) {
         queryParams.push(`sni=${proxy.sni}`);
@@ -317,13 +287,8 @@ export class SubscriptionParser {
   buildTrojanUrl(proxy) {
     let url = `trojan://${proxy.password}@${proxy.server}:${proxy.port}`;
     
-    const queryParams = [];
     if (proxy.sni) {
-      queryParams.push(`sni=${proxy.sni}`);
-    }
-    
-    if (queryParams.length > 0) {
-      url += `?${queryParams.join('&')}`;
+      url += `?sni=${proxy.sni}`;
     }
     
     if (proxy.name) {
@@ -563,95 +528,25 @@ export class SubscriptionParser {
           }
         }],
         ['vless', () => {
-          const hashIndex = url.indexOf('#');
-          if (hashIndex !== -1) {
-            return decodeURIComponent(url.substring(hashIndex + 1)) || 'VLESS节点';
-          }
           const vlessMatch = url.match(/vless:\/\/([^@]+)@([^:]+):(\d+)/);
           return vlessMatch ? vlessMatch[2] : 'VLESS节点';
         }],
         ['trojan', () => {
-          const hashIndex = url.indexOf('#');
-          if (hashIndex !== -1) {
-            return decodeURIComponent(url.substring(hashIndex + 1)) || 'Trojan节点';
-          }
           const trojanMatch = url.match(/trojan:\/\/([^@]+)@([^:]+):(\d+)/);
           return trojanMatch ? trojanMatch[2] : 'Trojan节点';
         }],
         ['ss', () => {
           try {
-            const hashIndex = url.indexOf('#');
-            if (hashIndex !== -1) {
-              const name = decodeURIComponent(url.substring(hashIndex + 1));
-              if (name) return name;
-            }
             const ssMatch = url.match(/ss:\/\/([^#]+)/);
             if (ssMatch) {
               const decoded = atob(ssMatch[1]);
               const [auth, server] = decoded.split('@');
-              if (server) {
-                return server.split(':')[0] || 'SS节点';
-              }
+              return server.split(':')[0] || 'SS节点';
             }
           } catch {
             return 'SS节点';
           }
           return 'SS节点';
-        }],
-        ['ssr', () => {
-          try {
-            const hashIndex = url.indexOf('#');
-            if (hashIndex !== -1) {
-              return decodeURIComponent(url.substring(hashIndex + 1)) || 'SSR节点';
-            }
-            // SSR URL格式: ssr://base64#name
-            const ssrMatch = url.match(/ssr:\/\/([^#]+)/);
-            if (ssrMatch) {
-              const decoded = atob(ssrMatch[1]);
-              const parts = decoded.split('/?');
-              if (parts.length > 1) {
-                const params = new URLSearchParams(parts[1]);
-                if (params.has('remarks')) {
-                  return atob(params.get('remarks')) || 'SSR节点';
-                }
-              }
-            }
-          } catch {
-            return 'SSR节点';
-          }
-          return 'SSR节点';
-        }],
-        ['hysteria', () => {
-          const hashIndex = url.indexOf('#');
-          if (hashIndex !== -1) {
-            return decodeURIComponent(url.substring(hashIndex + 1)) || 'Hysteria节点';
-          }
-          const hysteriaMatch = url.match(/hysteria:\/\/([^:]+):(\d+)/);
-          return hysteriaMatch ? hysteriaMatch[1] : 'Hysteria节点';
-        }],
-        ['hysteria2', () => {
-          const hashIndex = url.indexOf('#');
-          if (hashIndex !== -1) {
-            return decodeURIComponent(url.substring(hashIndex + 1)) || 'Hysteria2节点';
-          }
-          const hysteria2Match = url.match(/hysteria:\/\/([^:]+):(\d+)/);
-          return hysteria2Match ? hysteria2Match[1] : 'Hysteria2节点';
-        }],
-        ['tuic', () => {
-          const hashIndex = url.indexOf('#');
-          if (hashIndex !== -1) {
-            return decodeURIComponent(url.substring(hashIndex + 1)) || 'TUIC节点';
-          }
-          const tuicMatch = url.match(/tuic:\/\/([^@]+)@([^:]+):(\d+)/);
-          return tuicMatch ? tuicMatch[2] : 'TUIC节点';
-        }],
-        ['socks5', () => {
-          const hashIndex = url.indexOf('#');
-          if (hashIndex !== -1) {
-            return decodeURIComponent(url.substring(hashIndex + 1)) || 'SOCKS5节点';
-          }
-          const socks5Match = url.match(/socks5:\/\/([^:]+):(\d+)/);
-          return socks5Match ? socks5Match[1] : 'SOCKS5节点';
         }]
       ]);
       
