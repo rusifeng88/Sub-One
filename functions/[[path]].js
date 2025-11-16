@@ -1080,27 +1080,9 @@ async function generateCombinedNodeList(context, config, userAgent, subs, prepen
             
             // 如果YAML解析没有找到节点，尝试纯文本格式
             if (validNodes.length === 0) {
-                // 优化：改进纯文本节点解析，支持多种换行符和编码
-                const lines = text.replace(/\r\n/g, '\n').split('\n');
-                validNodes = lines
+                validNodes = text.replace(/\r\n/g, '\n').split('\n')
                     .map(line => line.trim())
-                    .filter(line => line.length > 0) // 过滤空行
                     .filter(line => nodeRegex.test(line));
-                
-                // 如果还是没有找到节点，尝试Base64解码后的文本再次解析
-                if (validNodes.length === 0 && text.length > 20) {
-                    try {
-                        // 尝试将整个文本作为Base64解码
-                        const decoded = atob(text.replace(/\s/g, ''));
-                        const decodedLines = decoded.split(/\r?\n/);
-                        validNodes = decodedLines
-                            .map(line => line.trim())
-                            .filter(line => line.length > 0)
-                            .filter(line => nodeRegex.test(line));
-                    } catch (e) {
-                        // Base64解码失败，忽略
-                    }
-                }
             }
 
             // [核心重構] 引入白名單 (keep:) 和黑名單 (exclude) 模式
@@ -1224,27 +1206,7 @@ async function generateCombinedNodeList(context, config, userAgent, subs, prepen
     });
     const processedSubContents = await Promise.all(subPromises);
     const combinedContent = (processedManualNodes + '\n' + processedSubContents.join('\n'));
-    
-    // 优化：改进节点去重和格式化逻辑，确保节点格式正确
-    const allNodeLines = combinedContent
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0) // 过滤空行
-        .filter(line => nodeRegex.test(line)); // 确保是有效的节点链接
-    
-    // 使用Set去重，保留第一次出现的节点
-    const uniqueNodes = [];
-    const seenNodes = new Set();
-    for (const nodeLine of allNodeLines) {
-        // 提取节点URL（不包含名称部分）作为去重的键
-        const urlPart = nodeLine.split('#')[0]; // 移除 # 后的名称部分
-        if (!seenNodes.has(urlPart)) {
-            seenNodes.add(urlPart);
-            uniqueNodes.push(nodeLine);
-        }
-    }
-    
-    const uniqueNodesString = uniqueNodes.join('\n');
+    const uniqueNodesString = [...new Set(combinedContent.split('\n').map(line => line.trim()).filter(line => line))].join('\n');
 
     // 确保最终的字符串在非空时以换行符结束，以兼容 subconverter
     let finalNodeList = uniqueNodesString;
@@ -1279,18 +1241,7 @@ async function handleSubRequest(context) {
 
     let token = '';
     let profileIdentifier = null;
-    // 优化：改进路径解析逻辑，支持多种URL格式
-    // 移除前导斜杠，然后分割路径段
-    let pathname = url.pathname;
-    // 移除前导斜杠
-    if (pathname.startsWith('/')) {
-        pathname = pathname.substring(1);
-    }
-    // 移除 /sub/ 前缀（如果存在）
-    if (pathname.startsWith('sub/')) {
-        pathname = pathname.substring(4);
-    }
-    const pathSegments = pathname.split('/').filter(Boolean);
+    const pathSegments = url.pathname.replace(/^\/sub\//, '/').split('/').filter(Boolean);
 
     if (pathSegments.length > 0) {
         token = pathSegments[0];
@@ -1300,9 +1251,6 @@ async function handleSubRequest(context) {
     } else {
         token = url.searchParams.get('token');
     }
-    
-    // 添加调试日志（生产环境可以移除）
-    console.log(`[SubRequest] Pathname: ${url.pathname}, Token: ${token}, ProfileIdentifier: ${profileIdentifier}`);
 
     let targetSubs;
     let subName = config.FileName;
@@ -1336,35 +1284,19 @@ async function handleSubRequest(context) {
                 targetSubs = [{ id: 'expired-node', url: DEFAULT_EXPIRED_NODE, name: '您的订阅已到期', isExpiredNode: true }]; // Set expired node as the only targetSub
             } else {
                 subName = profile.name;
-                const profileSubIds = new Set(profile.subscriptions || []);
-                const profileNodeIds = new Set(profile.manualNodes || []);
-                
-                // 优化：改进订阅组节点过滤逻辑，确保正确包含HTTP订阅和手动节点
+                const profileSubIds = new Set(profile.subscriptions);
+                const profileNodeIds = new Set(profile.manualNodes);
                 targetSubs = allSubs.filter(item => {
-                    // 检查项目是否启用
-                    if (!item.enabled) {
+                    const isSubscription = item.url.startsWith('http');
+                    const isManualNode = !isSubscription;
+
+                    // Check if the item belongs to the current profile and is enabled
+                    const belongsToProfile = (isSubscription && profileSubIds.has(item.id)) || (isManualNode && profileNodeIds.has(item.id));
+                    if (!item.enabled || !belongsToProfile) {
                         return false;
                     }
-                    
-                    // 判断是HTTP订阅还是手动节点
-                    const isSubscription = item.url && item.url.toLowerCase().startsWith('http');
-                    const isManualNode = !isSubscription;
-                    
-                    // 检查项目是否属于当前订阅组
-                    let belongsToProfile = false;
-                    if (isSubscription) {
-                        // HTTP订阅：检查ID是否在profile.subscriptions中
-                        belongsToProfile = profileSubIds.has(item.id);
-                    } else if (isManualNode) {
-                        // 手动节点：检查ID是否在profile.manualNodes中
-                        belongsToProfile = profileNodeIds.has(item.id);
-                    }
-                    
-                    return belongsToProfile;
+                    return true;
                 });
-                
-                // 添加调试日志
-                console.log(`[SubRequest] Profile: ${profile.name}, Found ${targetSubs.length} items (${profileSubIds.size} subscriptions, ${profileNodeIds.size} manual nodes)`);
             }
             effectiveSubConverter = profile.subConverter && profile.subConverter.trim() !== '' ? profile.subConverter : config.subConverter;
             effectiveSubConfig = profile.subConfig && profile.subConfig.trim() !== '' ? profile.subConfig : config.subConfig;
@@ -1386,33 +1318,14 @@ async function handleSubRequest(context) {
         return new Response('Subconverter backend is not configured.', { status: 500 });
     }
     
-    // 优化：改进格式参数解析逻辑，支持更多格式参数名称
     let targetFormat = url.searchParams.get('target');
     if (!targetFormat) {
-        // 优先检查 target 参数
-        // 然后检查常见的格式参数
-        const supportedFormats = ['clash', 'singbox', 'sing-box', 'surge', 'loon', 'base64', 'v2ray', 'trojan'];
+        const supportedFormats = ['clash', 'singbox', 'surge', 'loon', 'base64', 'v2ray', 'trojan'];
         for (const format of supportedFormats) {
             if (url.searchParams.has(format)) {
-                if (format === 'v2ray' || format === 'trojan') { 
-                    targetFormat = 'base64'; 
-                } else if (format === 'sing-box') {
-                    targetFormat = 'singbox'; // 统一使用 singbox
-                } else { 
-                    targetFormat = format; 
-                }
+                if (format === 'v2ray' || format === 'trojan') { targetFormat = 'base64'; } else { targetFormat = format; }
                 break;
             }
-        }
-    }
-    
-    // 如果还是没有格式，尝试从URL的查询参数中获取
-    // 支持格式参数作为查询参数的值（如 ?format=clash）
-    if (!targetFormat) {
-        targetFormat = url.searchParams.get('format');
-        // 标准化格式名称
-        if (targetFormat === 'sing-box') {
-            targetFormat = 'singbox';
         }
     }
     if (!targetFormat) {
@@ -1491,9 +1404,6 @@ async function handleSubRequest(context) {
     }
 
     const combinedNodeList = await generateCombinedNodeList(context, config, userAgentHeader, targetSubs, prependedContentForSubconverter);
-    
-    // 添加调试日志
-    console.log(`[SubRequest] TargetFormat: ${targetFormat}, NodeList length: ${combinedNodeList.length}, TargetSubs count: ${targetSubs.length}`);
 
     if (targetFormat === 'base64') {
         let contentToEncode;
@@ -1501,17 +1411,6 @@ async function handleSubRequest(context) {
             contentToEncode = DEFAULT_EXPIRED_NODE + '\n'; // Return the expired node link for base64 clients
         } else {
             contentToEncode = combinedNodeList;
-        }
-        // 优化：确保Base64编码前内容不为空且格式正确
-        if (!contentToEncode || contentToEncode.trim().length === 0) {
-            console.warn(`[SubRequest] Empty node list, returning empty response`);
-            return new Response('', { 
-                status: 404, 
-                headers: { 
-                    "Content-Type": "text/plain; charset=utf-8", 
-                    'Cache-Control': 'no-store, no-cache' 
-                } 
-            });
         }
         const headers = { "Content-Type": "text/plain; charset=utf-8", 'Cache-Control': 'no-store, no-cache' };
         return new Response(btoa(unescape(encodeURIComponent(contentToEncode))), { headers });
