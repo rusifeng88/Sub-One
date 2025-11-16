@@ -28,10 +28,11 @@ let copyTimeout = null;
 const formats = ['自适应', 'Base64', 'Clash', 'Sing-Box', 'Surge', 'Loon'];
 
 // 优化：预定义格式映射，避免每次计算时创建对象
+// 格式映射到URL查询参数名称（与后端解析逻辑保持一致）
 const FORMAT_MAPPING = {
   'Base64': 'base64',
   'Clash': 'clash',
-  'Sing-Box': 'singbox',
+  'Sing-Box': 'singbox',  // 统一使用 singbox（后端会处理 sing-box）
   'Surge': 'surge',
   'Loon': 'loon'
 };
@@ -51,7 +52,10 @@ const subLink = computed(() => {
     if (format === '自适应') {
       return url;
     }
+    // 使用格式映射，如果没有映射则使用小写格式名称
     const formatParam = FORMAT_MAPPING[format] || format.toLowerCase();
+    // 优化：确保URL格式正确，使用格式参数作为查询参数名
+    // 例如：?clash、?singbox、?surge 等
     return `${url}?${formatParam}`;
   } else {
     // 订阅组使用 profileToken
@@ -68,7 +72,10 @@ const subLink = computed(() => {
     if (format === '自适应') {
       return url;
     }
+    // 使用格式映射，如果没有映射则使用小写格式名称
     const formatParam = FORMAT_MAPPING[format] || format.toLowerCase();
+    // 优化：确保URL格式正确，使用格式参数作为查询参数名
+    // 例如：?clash、?singbox、?surge 等
     return `${url}?${formatParam}`;
   }
 });
